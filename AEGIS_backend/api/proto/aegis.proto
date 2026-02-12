@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/uusrajaminyak/aegis-backend/api/proto";
+
+service AegisSentinel {
+    rpc Connect (ConnectRequest) returns (ConnectResponse);
+    rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+    rpc SendAlert (AlertRequest) returns (AlertResponse);
+    rpc CommandStream (CommandRequest) returns (stream CommandMessage);
+}
+
+message ConnectRequest {
+    string hostname = 1;
+    string ip_address = 2;
+    string os_version = 3;
+    string agent_version = 4;
+    string public_key = 5;
+}
+
+message ConnectResponse {
+    string agent_id = 1;
+    string status = 2;
+    string auth_token = 3;
+}
+
+message HeartbeatRequest {
+    string agent_id = 1;
+    int64 timestamp = 2;
+    float cpu_usage = 3;
+    float ram_usage = 4;
+}
+
+message HeartbeatResponse {
+    string status = 1;
+}
+
+message AlertRequest {
+    string agent_id = 1;
+    string severity = 2;
+    string event_type = 3;
+    string description = 4;
+    string raw_data_json = 5;
+}
+
+message AlertResponse {
+    string alert_id = 1;
+    string action = 2;
+}
+
+message CommandRequest {
+    string agent_id = 1;
+}
+
+message CommandMessage {
+    string command_id = 1;
+    string type = 2;
+    string payload = 3;
+}
