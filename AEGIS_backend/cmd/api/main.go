@@ -26,7 +26,7 @@ func main() {
 						log.Fatalf("Failed to listen on port %s: %v", grpcPort, err)
 				}
 				grpcServer := grpc.NewServer()
-				sentinelHandler := &grpc_handler.SentinelServer{}
+				sentinelHandler := &grpc_handler.SentinelServer{DB: adapter.DB}
 				pb.RegisterAegisSentinelServer(grpcServer, sentinelHandler)
 				fmt.Printf("gRPC server listening on %s\n", grpcPort)
 				if err := grpcServer.Serve(lis); err != nil {

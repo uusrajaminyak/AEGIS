@@ -2,6 +2,7 @@ package grpc
 
 import (
 		"context"
+		"gorm.io/gorm"
 		"log"
 		"time"
 		"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 
 type SentinelServer struct {
 		pb.UnimplementedAegisSentinelServer
+		DB *gorm.DB
 }
 
 func (s *SentinelServer) Connect(ctx context.Context, req *pb.ConnectRequest) (*pb.ConnectResponse, error) {
@@ -30,12 +32,26 @@ func (s *SentinelServer) SendHeartbeat(ctx context.Context, req *pb.HeartbeatReq
 }
 
 func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*pb.AlertResponse, error) {
-		log.Printf("Received Alert from Agent %s: %s (%s)", req.AgentId, req.EventType, req.Severity)
+		log.Printf("Received Alert from %s: ", req.AgentId)
+		log.Printf("Event type: %s", req.EventType)
+		log.Printf("Severity: %s", req.Severity)
 		log.Printf("Alert Details: %s", req.Description)
 
+		if s.DB != nil {
+				query := `INSERT INTO alerts (agent_id, event_type, severity, description) VALUES (?, ?, ?, ?)`
+				result := s.DB.Exec(query, req.AgentId, req.EventType, req.Severity, req.Description)
+				if result.Error != nil {
+						log.Printf("Failed to store alert in database: %v", result.Error)
+				} else {
+						log.Printf("Alert stored in database successfully")
+				}
+		} else {
+				log.Printf("Database connection not available, skipping alert storage")
+		}
+
 		return &pb.AlertResponse{
-				AlertId: uuid.New()	.String(),
-				Action: "Log_only",
+				AlertId: uuid.New().String(),
+				Action: "Log_and_Investigate",
 		}, nil
 }
 
