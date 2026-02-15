@@ -4,6 +4,7 @@ import (
 "context"
 	"fmt"
 	"log"
+	"os/exec"
 	"syscall"
 	"unsafe"
 	"time"
@@ -41,7 +42,7 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 				req := &pb.AlertRequest{
 						AgentId: "agent-123",
 						Description: message,
-						EventType: "SensorAlert",
+						EventType: "CreateProcess_Hook",
 						Severity: fmt.Sprintf("%d", severity),
 				}
 				_, err := hqClient.SendAlert(ctx, req)
@@ -86,4 +87,16 @@ func main() {
 		}
 		initSensor.Call()
 		fmt.Println("Sensor initialized successfully.")
+
+		fmt.Println("Agent tries to open notepad")
+
+		go func() {
+				time.Sleep(2 * time.Second)
+				cmd := exec.Command("notepad.exe")
+				err := cmd.Start()
+				if err != nil {
+						log.Printf("Failed to start notepad: %v", err)
+				}
+		}()
+		select {}
 }
