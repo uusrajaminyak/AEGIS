@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 	"time"
+	"strings"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
@@ -34,6 +35,15 @@ func cStringToGo(ptr uintptr) string {
 func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 		message := cStringToGo(messagePtr)
 		fmt.Printf("Alert received - Severity: %d, Message: %s\n", severity, message)
+		lowerMsg := strings.ToLower(message)
+
+		if strings.Contains(lowerMsg, "notepad.exe") && !strings.Contains(lowerMsg, "taskkill") {
+				go func() {
+						time.Sleep(1 * time.Second)
+						killProcessByName("notepad.exe")
+				}()
+		}
+
 		fmt.Printf("Sending alert to HQ...\n")
 
 		if hqClient != nil {
@@ -53,6 +63,17 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 				}
 		}
 		return 0
+}
+
+func killProcessByName(processName string) {
+		fmt.Printf("Attempting to kill process: %s\n", processName)
+		cmd := exec.Command("taskkill", "/F", "/T", "/IM", processName)
+		err := cmd.Run()
+		if err != nil {
+				log.Printf("Failed to kill process %s: %v", processName, err)
+		} else {
+				log.Printf("Process %s killed successfully", processName)
+		}
 }
 
 func main() {
