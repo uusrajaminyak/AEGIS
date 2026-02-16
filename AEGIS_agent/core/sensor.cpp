@@ -1,4 +1,7 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <iostream>
+#include <string>
 #include <windows.h>
 #include "MinHook.h"
 
@@ -33,6 +36,24 @@ BOOL WINAPI DetourCreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine
     return fpCreateProcessW(lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo, lpProcessInformation);
 }
 
+typedef int (WSAAPI *CONNECT_FUNC)(SOCKET s, const struct sockaddr*, int);
+CONNECT_FUNC fpConnect = NULL;
+
+int WSAAPI DetourConnect(SOCKET s, const struct sockaddr* name, int namelen) {
+    if (name->sa_family == AF_INET) {
+        struct sockaddr_in* addr = (struct sockaddr_in*)name;
+        char ipStr[INET_ADDRSTRLEN];
+
+        inet_ntop(AF_INET, &(addr->sin_addr), ipStr, INET_ADDRSTRLEN);
+        int port = ntohs(addr->sin_port);
+        if (g_AlertCallback) {
+            std::string alertMessage = "Network Connection: " + std::string(ipStr) + ":" + std::to_string(port);
+            g_AlertCallback(3, (uintptr_t)alertMessage.c_str());
+        }
+    }
+    return fpConnect(s, name, namelen);
+}
+
 extern "C" {
     __declspec(dllexport) void SetAlertCallback(AlertCallback callback) {
         g_AlertCallback = callback;
@@ -49,11 +70,33 @@ extern "C" {
             return;
         }
 
+        if (MH_CreateHookApi(L"ws2_32", "connect", (LPVOID)&DetourConnect, (LPVOID*)&fpConnect) != MH_OK) {
+            std::cerr << "Failed to create hook for connect." << std::endl;
+            return;
+        }
+
         if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
             std::cerr << "Failed to enable hooks." << std::endl;
             return;
         }
 
         std::cout << "Sensor initialized and CreateProcessW hooked successfully." << std::endl;
+    }
+
+    __declspec(dllexport) void TestNetworkHook() {
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+        SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+        if (sock != INVALID_SOCKET) {
+            sockaddr_in clientService;
+            clientService.sin_family = AF_INET;
+            clientService.sin_addr.s_addr = inet_addr("93.184.215.14");
+            clientService.sin_port = htons(80);
+
+            connect(sock, (SOCKADDR*)&clientService, sizeof(clientService));
+            closesocket(sock);
+        }
+        WSACleanup();
     }
 }

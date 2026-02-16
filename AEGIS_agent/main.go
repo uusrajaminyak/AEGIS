@@ -90,6 +90,13 @@ func main() {
 
 		fmt.Println("Agent tries to open notepad")
 
+		testNetProc, err := aegisCore.FindProc("TestNetworkHook")
+		if err != nil {
+				log.Fatalf("Failed to find TestNetworkHook procedure: %v", err)
+		}
+
+		fmt.Println("Testing network hook...")
+
 		go func() {
 				time.Sleep(2 * time.Second)
 				cmd := exec.Command("notepad.exe")
@@ -97,6 +104,10 @@ func main() {
 				if err != nil {
 						log.Printf("Failed to start notepad: %v", err)
 				}
+
+				time.Sleep(2 * time.Second)
+
+				testNetProc.Call()
 		}()
 		select {}
 }
