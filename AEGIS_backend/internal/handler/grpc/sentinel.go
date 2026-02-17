@@ -5,9 +5,16 @@ import (
 		"gorm.io/gorm"
 		"log"
 		"time"
+		"strings"
 		"github.com/google/uuid"
 		pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 )
+
+var BlacklistedProcesses = []string {
+		"notepad.exe",
+		"calculator.exe",
+		"malware.exe",
+}
 
 type SentinelServer struct {
 		pb.UnimplementedAegisSentinelServer
@@ -37,6 +44,21 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 		log.Printf("Severity: %s", req.Severity)
 		log.Printf("Alert Details: %s", req.Description)
 
+		action := "Log_and_Investigate"
+		targetProcess := ""
+		lowerMsg := strings.ToLower(req.Description)
+
+		if strings.Contains(lowerMsg, "createprocess") && !strings.Contains(lowerMsg, "taskkill") {
+				for _, badProcess := range BlacklistedProcesses {
+						if strings.Contains(lowerMsg, badProcess) {
+								action = "Kill"
+								targetProcess = badProcess
+								log.Printf("Threat detected, killing process: %s", targetProcess)
+								break
+						}
+				}
+		}
+
 		if s.DB != nil {
 				query := `INSERT INTO alerts (agent_id, event_type, severity, description) VALUES (?, ?, ?, ?)`
 				result := s.DB.Exec(query, req.AgentId, req.EventType, req.Severity, req.Description)
@@ -51,7 +73,8 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 
 		return &pb.AlertResponse{
 				AlertId: uuid.New().String(),
-				Action: "Log_and_Investigate",
+				Action: action,
+				Target: targetProcess,
 		}, nil
 }
 

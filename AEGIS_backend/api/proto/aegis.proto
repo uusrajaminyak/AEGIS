@@ -47,6 +47,7 @@ message AlertRequest {
 message AlertResponse {
     string alert_id = 1;
     string action = 2;
+    string target = 3;
 }
 
 message CommandRequest {
