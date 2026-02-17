@@ -48,10 +48,10 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 		targetProcess := ""
 		lowerMsg := strings.ToLower(req.Description)
 
-		if strings.Contains(lowerMsg, "createprocess") && !strings.Contains(lowerMsg, "taskkill") {
+		if req.EventType == "CreateProcess_Hook" && !strings.Contains(lowerMsg, "taskkill") {
 				for _, badProcess := range BlacklistedProcesses {
 						if strings.Contains(lowerMsg, badProcess) {
-								action = "Kill"
+								action = "KILL"
 								targetProcess = badProcess
 								log.Printf("Threat detected, killing process: %s", targetProcess)
 								break

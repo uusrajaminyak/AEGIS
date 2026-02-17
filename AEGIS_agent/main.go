@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"unsafe"
 	"time"
-	"strings"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
@@ -35,15 +34,6 @@ func cStringToGo(ptr uintptr) string {
 func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 		message := cStringToGo(messagePtr)
 		fmt.Printf("Alert received - Severity: %d, Message: %s\n", severity, message)
-		lowerMsg := strings.ToLower(message)
-
-		if strings.Contains(lowerMsg, "notepad.exe") && !strings.Contains(lowerMsg, "taskkill") {
-				go func() {
-						time.Sleep(1 * time.Second)
-						killProcessByName("notepad.exe")
-				}()
-		}
-
 		fmt.Printf("Sending alert to HQ...\n")
 
 		if hqClient != nil {
@@ -55,11 +45,18 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 						EventType: "CreateProcess_Hook",
 						Severity: fmt.Sprintf("%d", severity),
 				}
-				_, err := hqClient.SendAlert(ctx, req)
+				res, err := hqClient.SendAlert(ctx, req)
 				if err != nil {
 						log.Printf("Failed to send alert to HQ: %v", err)
 				} else {
 						log.Printf("Alert sent to HQ successfully")
+						log.Printf("HQ Response - Alert ID: %s, Action: %s, Target: %s", res.AlertId, res.Action, res.Target)
+						if res.Action == "KILL" && res.Target != "" {
+								go func(targetToKill string) {
+										time.Sleep(1 * time.Second)
+										killProcessByName(targetToKill)
+								}(res.Target)
+						}
 				}
 		}
 		return 0
