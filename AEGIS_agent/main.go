@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"syscall"
 	"unsafe"
+	"strings"
 	"time"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -54,7 +55,7 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 						if res.Action == "KILL" && res.Target != "" {
 								go func(targetToKill string) {
 										time.Sleep(1 * time.Second)
-										killProcessByName(targetToKill)
+										killProcessByPattern(targetToKill)
 								}(res.Target)
 						}
 				}
@@ -62,14 +63,16 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 		return 0
 }
 
-func killProcessByName(processName string) {
-		fmt.Printf("Attempting to kill process: %s\n", processName)
-		cmd := exec.Command("taskkill", "/F", "/T", "/IM", processName)
+func killProcessByPattern(pattern string) {
+		fmt.Printf("Hunting process matching: '%s'", pattern)
+		safeRegex := strings.ReplaceAll(pattern, " ", ".*")
+		psCmd := fmt.Sprintf(`Get-WmiObject Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '%s' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`, safeRegex)
+		cmd := exec.Command("powershell", "-Command", psCmd)
 		err := cmd.Run()
 		if err != nil {
-				log.Printf("Failed to kill process %s: %v", processName, err)
+				log.Printf("Failed to kill process pattern '%s': %v", pattern, err)
 		} else {
-				log.Printf("Process %s killed successfully", processName)
+				log.Printf("Process pattern '%s' killed successfully", pattern)
 		}
 }
 
@@ -106,25 +109,25 @@ func main() {
 		initSensor.Call()
 		fmt.Println("Sensor initialized successfully.")
 
-		fmt.Println("Agent tries to open notepad")
-
 		testNetProc, err := aegisCore.FindProc("TestNetworkHook")
 		if err != nil {
 				log.Fatalf("Failed to find TestNetworkHook procedure: %v", err)
 		}
 
 		fmt.Println("Testing network hook...")
+		fmt.Println("Simulating fileless process creation...")
 
 		go func() {
 				time.Sleep(2 * time.Second)
-				cmd := exec.Command("notepad.exe")
+				cmd := exec.Command("powershell.exe", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", "Start-Sleep -Seconds 15")
 				err := cmd.Start()
 				if err != nil {
-						log.Printf("Failed to start notepad: %v", err)
+						log.Printf("Failed to simulate fileless malware: %v", err)
+				} else {
+						log.Printf("Fileless malware simulation started with PID: %d", cmd.Process.Pid)
 				}
 
 				time.Sleep(2 * time.Second)
-
 				testNetProc.Call()
 		}()
 		select {}
