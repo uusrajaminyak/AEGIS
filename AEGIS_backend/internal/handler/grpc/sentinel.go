@@ -10,15 +10,16 @@ import (
 		pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 )
 
-var BlacklistedProcesses = []string {
-		"notepad.exe",
-		"calculator.exe",
-		"malware.exe",
-}
-
 type SentinelServer struct {
 		pb.UnimplementedAegisSentinelServer
 		DB *gorm.DB
+}
+
+type DetectionRule struct {
+		ID uint `gorm:"primaryKey"`
+		ProcessName string `gorm:"unique;not null"`
+		Action string `gorm:"not null"`
+		IsActive bool `gorm:"default:true"`
 }
 
 func (s *SentinelServer) Connect(ctx context.Context, req *pb.ConnectRequest) (*pb.ConnectResponse, error) {
@@ -49,11 +50,17 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 		lowerMsg := strings.ToLower(req.Description)
 
 		if req.EventType == "CreateProcess_Hook" && !strings.Contains(lowerMsg, "taskkill") {
-				for _, badProcess := range BlacklistedProcesses {
+				var activeRules []DetectionRule
+				if s.DB != nil {
+						s.DB.AutoMigrate(&DetectionRule{})
+						s.DB.Where("is_active = ?", true).Find(&activeRules)
+				}
+				for _, rule := range activeRules {
+						badProcess := strings.ToLower(rule.ProcessName)
 						if strings.Contains(lowerMsg, badProcess) {
-								action = "KILL"
-								targetProcess = badProcess
-								log.Printf("Threat detected, killing process: %s", targetProcess)
+								action = rule.Action
+								targetProcess = rule.ProcessName
+								log.Printf("Detection rule matched: %s, Action: %s", badProcess, action)
 								break
 						}
 				}
