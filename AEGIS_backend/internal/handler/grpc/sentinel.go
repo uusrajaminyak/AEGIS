@@ -86,7 +86,27 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 }
 
 func (s *SentinelServer) CommandStream(req *pb.CommandRequest, stream pb.AegisSentinel_CommandStreamServer) error {
+		log.Printf("Agent %s connected for command stream", req.AgentId)
 		for {
-				time.Sleep(10 * time.Second)
+				var activeRules []DetectionRule
+				if s.DB != nil {
+						s.DB.Where("is_active = ?", true).Find(&activeRules)
+				}
+
+				var ruleNames []string
+				for _, rule := range activeRules {
+						ruleNames = append(ruleNames, strings.ToLower(rule.ProcessName))
+				}
+				combinedRules := strings.Join(ruleNames, ",")
+				res := &pb.CommandMessage{
+						Type: "SYNC_RULES",
+						Payload: combinedRules,
+				}
+
+				if err := stream.Send(res); err != nil {
+						log.Printf("Error sending command to agent %s: %v", req.AgentId, err)
+						return err
+				}
+				time.Sleep(30 * time.Second)
 		}
 } 

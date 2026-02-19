@@ -10,6 +10,7 @@ import (
 	"unsafe"
 	"strings"
 	"time"
+	"sync"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"github.com/shirou/gopsutil/v3/process"
@@ -18,7 +19,33 @@ import (
 )
 
 var hqClient pb.AegisSentinelClient
+var localRuleCache []string 
+var cacheMutex sync.RWMutex
 
+func listenToHQ() {
+		req := &pb.CommandRequest{AgentId: "agent-123"}
+		stream, err := hqClient.CommandStream(context.Background(), req)
+		if err != nil {
+				log.Printf("Failed to start command stream: %v\n", err)
+				return
+		}
+
+		for {
+				res, err := stream.Recv()
+				if err != nil {
+						log.Printf("Error receiving command from HQ: %v\n", err)
+						log.Printf("Attempting to reconnect to HQ...\n")
+						time.Sleep(5 * time.Second)
+						continue
+				}
+				if res.Type == "SYNC_RULES" {
+						cacheMutex.Lock()
+						localRuleCache = strings.Split(res.Payload, ",")
+						cacheMutex.Unlock()
+						log.Printf("Local rule cache updated, total threat remembered: %v\n", len(localRuleCache))
+				}
+		}
+}
 func cStringToGo(ptr uintptr) string {
 		if ptr == 0 {
 				return ""
@@ -142,6 +169,10 @@ func main() {
 		}
 		initSensor.Call()
 		fmt.Println("Sensor initialized successfully.")
+
+		hqClient = pb.NewAegisSentinelClient(conn)
+		fmt.Println("Connected to HQ")
+		go listenToHQ()
 
 		testNetProc, err := aegisCore.FindProc("TestNetworkHook")
 		if err != nil {
