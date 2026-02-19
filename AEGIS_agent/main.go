@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 	"sync"
+	"crypto/tls"
+	"crypto/x509"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"github.com/shirou/gopsutil/v3/process"
 	"golang.org/x/sys/windows"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
@@ -140,7 +142,25 @@ func killProcessNative(pattern string) {
 func main() {
 		fmt.Println("Loading sensor module...")
 		dllPath := "core/aegis_core.dll"
-		conn, err := grpc.Dial("localhost:9090", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		caCert, err := os.ReadFile("cert/ca.crt")
+		if err != nil {
+				log.Fatalf("Failed to read CA certificate: %v", err)
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+				log.Fatalf("Failed to append CA certificate to pool")
+		}
+		clientCert, err := tls.LoadX509KeyPair("cert/client.crt", "cert/client.key")
+		if err != nil {
+				log.Fatalf("Failed to load client certificate and key: %v", err)
+		}
+		creds := credentials.NewTLS(&tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs: certPool,
+				MinVersion: tls.VersionTLS13,
+		})
+		conn, err := grpc.Dial("localhost:9090", grpc.WithTransportCredentials(creds))
+
 		if err != nil {
 				log.Fatalf("Failed to connect to HQ: %v\n", err)
 		}

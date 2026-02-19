@@ -5,5 +5,6 @@ docker-compose.yml
 *.dll
 *.so
 *.o
+*cert
 
 vendor/

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"log"
 	"net"
-
+	"os"
+	"crypto/tls"
+	"crypto/x509"
+	"google.golang.org/grpc/credentials"
 	"github.com/gin-gonic/gin"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"github.com/uusrajaminyak/aegis-backend/config"
@@ -25,7 +28,26 @@ func main() {
 				if err != nil {
 						log.Fatalf("Failed to listen on port %s: %v", grpcPort, err)
 				}
-				grpcServer := grpc.NewServer()
+				caCert, err := os.ReadFile("cert/ca.crt")
+				if err != nil {
+						log.Fatalf("Failed to read CA certificate: %v", err)
+				}
+				certPool := x509.NewCertPool()
+				if !certPool.AppendCertsFromPEM(caCert) {
+						log.Fatalf("Failed to append CA certificate to pool")
+				}
+				serverCert, err := tls.LoadX509KeyPair("cert/server.crt", "cert/server.key")
+				if err != nil {
+						log.Fatalf("Failed to load server certificate and key: %v", err)
+				}
+				creds := credentials.NewTLS(&tls.Config{
+						Certificates: []tls.Certificate{serverCert},
+						ClientCAs: certPool,
+						ClientAuth: tls.RequireAndVerifyClientCert,
+						MinVersion: tls.VersionTLS13,
+				})
+				grpcServer := grpc.NewServer(grpc.Creds(creds))
+				
 				sentinelHandler := &grpc_handler.SentinelServer{DB: adapter.DB}
 				pb.RegisterAegisSentinelServer(grpcServer, sentinelHandler)
 				fmt.Printf("gRPC server listening on %s\n", grpcPort)
