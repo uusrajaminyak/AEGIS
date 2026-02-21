@@ -39,6 +39,9 @@ BOOL WINAPI DetourCreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine
 typedef int (WSAAPI *CONNECT_FUNC)(SOCKET s, const struct sockaddr*, int);
 CONNECT_FUNC fpConnect = NULL;
 
+typedef HANDLE(WINAPI *CREATEFILEW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+CREATEFILEW fpCreateFileW = NULL;
+
 int WSAAPI DetourConnect(SOCKET s, const struct sockaddr* name, int namelen) {
     if (name->sa_family == AF_INET) {
         struct sockaddr_in* addr = (struct sockaddr_in*)name;
@@ -52,6 +55,20 @@ int WSAAPI DetourConnect(SOCKET s, const struct sockaddr* name, int namelen) {
         }
     }
     return fpConnect(s, name, namelen);
+}
+
+HANDLE WINAPI DetourCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+    if (dwDesiredAccess & GENERIC_WRITE) {
+        if(g_AlertCallback && lpFileName) {
+            std::wstring wsFileName(lpFileName);
+            if (wsFileName.find(L"C:\\Windows") == std::wstring::npos) {
+                std::string utf8FileName = WideToUTF8(wsFileName);
+                std::string alertMessage = "File Write: " + utf8FileName;
+                g_AlertCallback(4, (uintptr_t)alertMessage.c_str());
+            }
+        }
+    }
+    return fpCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 }
 
 extern "C" {
@@ -75,12 +92,17 @@ extern "C" {
             return;
         }
 
+        if (MH_CreateHookApi(L"kernel32", "CreateFileW", (LPVOID)&DetourCreateFileW, (LPVOID*)&fpCreateFileW) != MH_OK) {
+            std::cerr << "Failed to create hook for CreateFileW." << std::endl;
+            return;
+        }
+
         if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
             std::cerr << "Failed to enable hooks." << std::endl;
             return;
         }
 
-        std::cout << "Sensor initialized and CreateProcessW hooked successfully." << std::endl;
+        std::cout << "Sensor initialized and all hooks installed successfully." << std::endl;
     }
 
     __declspec(dllexport) void TestNetworkHook() {
@@ -98,5 +120,12 @@ extern "C" {
             closesocket(sock);
         }
         WSACleanup();
+    }
+
+    __declspec(dllexport) void TestFileHook() {
+        HANDLE hFile = CreateFileW(L"C:\\testfile.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(hFile);
+        }
     }
 }
