@@ -37,7 +37,7 @@ BOOL WINAPI DetourCreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine
     if (g_AlertCallback && !fullTarget.empty())
     {
         std::string utf8Target = WideToUTF8(fullTarget);
-        std::string alertMessage = "Process Creation: " + utf8Target;
+        std::string alertMessage = "[*] Process Creation: " + utf8Target;
         g_AlertCallback(2, (uintptr_t)alertMessage.c_str());
     }
     return fpCreateProcessW(lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo, lpProcessInformation);
@@ -48,6 +48,9 @@ CONNECT_FUNC fpConnect = NULL;
 
 typedef HANDLE(WINAPI *CREATEFILEW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 CREATEFILEW fpCreateFileW = NULL;
+
+typedef HANDLE(WINAPI *OPENPROCESS)(DWORD, BOOL, DWORD);
+OPENPROCESS fpOpenProcess = NULL;
 
 int WSAAPI DetourConnect(SOCKET s, const struct sockaddr *name, int namelen)
 {
@@ -60,7 +63,7 @@ int WSAAPI DetourConnect(SOCKET s, const struct sockaddr *name, int namelen)
         int port = ntohs(addr->sin_port);
         if (g_AlertCallback)
         {
-            std::string alertMessage = "Network Connection: " + std::string(ipStr) + ":" + std::to_string(port);
+            std::string alertMessage = "[*] Network Connection: " + std::string(ipStr) + ":" + std::to_string(port);
             g_AlertCallback(3, (uintptr_t)alertMessage.c_str());
         }
     }
@@ -77,12 +80,28 @@ HANDLE WINAPI DetourCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD
             if (wsFileName.find(L"C:\\Windows") == std::wstring::npos)
             {
                 std::string utf8FileName = WideToUTF8(wsFileName);
-                std::string alertMessage = "File Write: " + utf8FileName;
+                std::string alertMessage = "[*] File Write: " + utf8FileName;
                 g_AlertCallback(4, (uintptr_t)alertMessage.c_str());
             }
         }
     }
     return fpCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+HANDLE WINAPI DetourOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId)
+{
+    DWORD currentPID = GetCurrentProcessId();
+    if (dwProcessId == currentPID && (dwDesiredAccess & PROCESS_TERMINATE))
+    {
+        if (g_AlertCallback)
+        {
+            std::string alertMessage = "[*] Attempt to open current process with TERMINATE access.";
+            g_AlertCallback(5, (uintptr_t)alertMessage.c_str());
+        }
+        SetLastError(ERROR_ACCESS_DENIED);
+        return NULL;
+    }
+    return fpOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
 }
 
 extern "C"
@@ -96,35 +115,41 @@ extern "C"
     {
         if (MH_Initialize() != MH_OK)
         {
-            std::cerr << "Failed to initialize MinHook." << std::endl;
+            std::cerr << "[!] Failed to initialize MinHook." << std::endl;
             return;
         }
 
         if (MH_CreateHookApi(L"kernel32", "CreateProcessW", (LPVOID)&DetourCreateProcessW, (LPVOID *)&fpCreateProcessW) != MH_OK)
         {
-            std::cerr << "Failed to create hook for CreateProcessW." << std::endl;
+            std::cerr << "[!] Failed to create hook for CreateProcessW." << std::endl;
+            return;
+        }
+
+        if (MH_CreateHookApi(L"kernel32", "OpenProcess", (LPVOID)&DetourOpenProcess, (LPVOID *)&fpOpenProcess) != MH_OK)
+        {
+            std::cerr << "[!] Failed to create hook for OpenProcess." << std::endl;
             return;
         }
 
         if (MH_CreateHookApi(L"ws2_32", "connect", (LPVOID)&DetourConnect, (LPVOID *)&fpConnect) != MH_OK)
         {
-            std::cerr << "Failed to create hook for connect." << std::endl;
+            std::cerr << "[!] Failed to create hook for connect." << std::endl;
             return;
         }
 
         if (MH_CreateHookApi(L"kernel32", "CreateFileW", (LPVOID)&DetourCreateFileW, (LPVOID *)&fpCreateFileW) != MH_OK)
         {
-            std::cerr << "Failed to create hook for CreateFileW." << std::endl;
+            std::cerr << "[!] Failed to create hook for CreateFileW." << std::endl;
             return;
         }
 
         if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK)
         {
-            std::cerr << "Failed to enable hooks." << std::endl;
+            std::cerr << "[!] Failed to enable hooks." << std::endl;
             return;
         }
 
-        std::cout << "Sensor initialized and all hooks installed successfully." << std::endl;
+        std::cout << "[+] Sensor initialized and all hooks installed successfully." << std::endl;
     }
 
     __declspec(dllexport) void TestNetworkHook()
@@ -152,6 +177,21 @@ extern "C"
         if (hFile != INVALID_HANDLE_VALUE)
         {
             CloseHandle(hFile);
+        }
+    }
+
+    __declspec(dllexport) void TestAntiTamperHook()
+    {
+        DWORD currentPID = GetCurrentProcessId();
+        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, currentPID);
+        if (hProcess != NULL)
+        {
+            std::cout << "[!] Anti-Tamper failed" << std::endl;
+            CloseHandle(hProcess);
+        }
+        else
+        {
+            std::cout << "[+] Anti-Tamper succeeded: Access denied as expected." << std::endl;
         }
     }
 }

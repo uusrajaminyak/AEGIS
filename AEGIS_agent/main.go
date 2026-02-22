@@ -80,7 +80,7 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 		req := &pb.AlertRequest{
 			AgentId:     "agent-123",
 			Description: message,
-			EventType:   "CreateProcess_Hook",
+			EventType:   "Sensor_Hook",
 			Severity:    fmt.Sprintf("%d", severity),
 		}
 		res, err := hqClient.SendAlert(ctx, req)
@@ -227,6 +227,11 @@ func main() {
 		log.Fatalf("[-] Failed to find TestFileHook procedure: %v\n", err)
 	}
 
+	testAntiTamperProc, err := aegisCore.FindProc("TestAntiTamperHook")
+	if err != nil {
+		log.Fatalf("[-] Failed to find TestAntiTamperHook procedure: %v\n", err)
+	}
+
 	fmt.Println("[*] Testing network hook...")
 	fmt.Println("[*] Simulating fileless process creation...")
 
@@ -243,9 +248,14 @@ func main() {
 
 		time.Sleep(2 * time.Second)
 		testNetProc.Call()
+
 		time.Sleep(2 * time.Second)
 		fmt.Println("[*] Testing file hook...")
 		testFileProc.Call()
+
+		time.Sleep(2 * time.Second)
+		fmt.Println("[*] Testing anti-tamper hook...")
+		testAntiTamperProc.Call()
 	}()
 	select {}
 }
