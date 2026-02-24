@@ -4,17 +4,72 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
+	"net"
+	"os"
+	"sync"
+	"context"
+
 	"github.com/gin-gonic/gin"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"github.com/uusrajaminyak/aegis-backend/config"
 	"github.com/uusrajaminyak/aegis-backend/internal/adapter"
 	grpc_handler "github.com/uusrajaminyak/aegis-backend/internal/handler/grpc"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"log"
-	"net"
-	"os"
+	"google.golang.org/grpc/status"
 )
+
+type RateLimiterManager struct {
+	limiters map[string]*rate.Limiter
+	mu       sync.RWMutex
+	rate     rate.Limit
+	burst    int
+}
+
+func NewRateLimiterManager(r rate.Limit, b int) *RateLimiterManager {
+	return &RateLimiterManager{
+		limiters: make(map[string]*rate.Limiter),
+		rate:     r,
+		burst:    b,
+	}
+}
+
+func (rlm *RateLimiterManager) GetLimiter(clientID string) *rate.Limiter {
+	rlm.mu.RLock()
+	limiter, exists := rlm.limiters[clientID]
+	rlm.mu.RUnlock()
+	if !exists {
+		rlm.mu.Lock()
+		limiter, exists = rlm.limiters[clientID]
+		if !exists {
+			limiter = rate.NewLimiter(rlm.rate, rlm.burst)
+			rlm.limiters[clientID] = limiter
+		}
+		rlm.mu.Unlock()
+	}
+	return limiter
+}
+
+func (rlm *RateLimiterManager) UnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		var AgentID string
+		if alertReq, ok := req.(*pb.AlertRequest); ok {
+			AgentID = alertReq.AgentId
+		} else {
+			AgentID = "unknown"
+		}
+		if AgentID != "unknown" {
+			limiter := rlm.GetLimiter(AgentID)
+			if !limiter.Allow() {
+				return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded for agent %s", AgentID)
+			}
+		}
+		return handler(ctx, req)
+	}
+}
 
 func main() {
 	cfg, err := config.LoadConfig(".")
@@ -46,7 +101,10 @@ func main() {
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 			MinVersion:   tls.VersionTLS13,
 		})
-		grpcServer := grpc.NewServer(grpc.Creds(creds))
+
+		limitManager := NewRateLimiterManager(rate.Limit(5), 10)
+
+		grpcServer := grpc.NewServer(grpc.Creds(creds), grpc.UnaryInterceptor(limitManager.UnaryInterceptor()))
 
 		sentinelHandler := &grpc_handler.SentinelServer{DB: adapter.DB}
 		pb.RegisterAegisSentinelServer(grpcServer, sentinelHandler)
