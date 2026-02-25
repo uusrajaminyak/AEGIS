@@ -8,11 +8,14 @@ import (
 	"log"
 	"strings"
 	"time"
+	"encoding/json"
+	"github.com/nats-io/nats.go"
 )
 
 type SentinelServer struct {
 	pb.UnimplementedAegisSentinelServer
 	DB *gorm.DB
+	JS nats.JetStreamContext
 }
 
 type DetectionRule struct {
@@ -67,16 +70,29 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 		}
 	}
 
-	if s.DB != nil {
-		query := `INSERT INTO alerts (agent_id, event_type, severity, description) VALUES (?, ?, ?, ?)`
-		result := s.DB.Exec(query, req.AgentId, req.EventType, req.Severity, req.Description)
-		if result.Error != nil {
-			log.Printf("[-] Failed to store alert in database: %v", result.Error)
+	if s.JS != nil {
+		payload := map[string]interface{}{
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"agent_id": req.AgentId,
+			"event_type": req.EventType,
+			"severity": req.Severity,
+			"description": req.Description,
+			"action": action,
+			"target_process": targetProcess,
+		}
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			log.Printf("[!] Failed to encode alert to JSON: %v", err)
 		} else {
-			log.Printf("[+] Alert stored in database successfully")
+			_, err = s.JS.Publish("Alerts.new", jsonData)
+			if err != nil {
+				log.Printf("[!] Failed to publish alert to NATS: %v", err)
+			} else {
+				log.Printf("[+] Alert published to NATS Queue")
+			}
 		}
 	} else {
-		log.Printf("[-] Database connection not available, skipping alert storage")
+		log.Printf("[!] NATS JetStream context not available, skipping alert publication")
 	}
 
 	return &pb.AlertResponse{

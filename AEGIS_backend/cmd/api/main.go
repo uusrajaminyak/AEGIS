@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+	"github.com/nats-io/nats.go"
 )
 
 type RateLimiterManager struct {
@@ -76,6 +77,28 @@ func main() {
 		log.Fatalf("[!] Failed to load config: %v", err)
 	}
 	adapter.ConnectPostgres(cfg)
+
+	nc, err := nats.Connect(nats.DefaultURL)
+	if err != nil {
+		log.Fatalf("[!] Failed to connect to NATS server: %v", err)
+	}
+	defer nc.Close()
+
+	js, err := nc.JetStream()
+	if err != nil {
+		log.Fatalf("[!] Failed to get JetStream context: %v", err)
+	}
+
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: "Alerts_Stream",
+		Subjects: []string{"Alerts.*"},
+	})
+	if err != nil {
+		log.Printf("[!] Failed to add stream (might already exist): %v", err)
+	} else {
+		log.Printf("[*] Stream 'Alerts_Stream' created successfully")
+	}
+
 	go func() {
 		grpcPort := ":9090"
 		lis, err := net.Listen("tcp", grpcPort)
@@ -105,7 +128,10 @@ func main() {
 
 		grpcServer := grpc.NewServer(grpc.Creds(creds), grpc.UnaryInterceptor(limitManager.UnaryInterceptor()))
 
-		sentinelHandler := &grpc_handler.SentinelServer{DB: adapter.DB}
+		sentinelHandler := &grpc_handler.SentinelServer{
+			DB: adapter.DB,
+			JS: js,
+		}
 		pb.RegisterAegisSentinelServer(grpcServer, sentinelHandler)
 		fmt.Printf("[*] gRPC server listening on %s\n", grpcPort)
 		if err := grpcServer.Serve(lis); err != nil {
