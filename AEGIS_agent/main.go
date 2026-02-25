@@ -8,6 +8,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+	"path/filepath"
 )
 
 var hqClient pb.AegisSentinelClient
@@ -151,11 +153,51 @@ func killProcessNative(pattern string) {
 	}
 }
 
-func main() {
-	fmt.Println("[*] Loading sensor module...")
-	dllPath := "core/aegis_core.dll"
-	caCert, err := os.ReadFile("cert/ca.crt")
+const scvName = "AEGISAgentService"
 
+type aegisService struct{}
+
+func (m *aegisService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
+	changes <- svc.Status{State: svc.StartPending}
+	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+	go runAgentLogic()
+
+loop:
+	for {
+		c := <-r
+		switch c.Cmd {
+		case svc.Interrogate:
+			changes <- c.CurrentStatus
+		case svc.Stop, svc.Shutdown:
+			log.Println("[*] Service stop requested, shutting down...")
+			break loop
+		default:
+			log.Printf("[-] Unexpected control request #%d\n", c.Cmd)
+		}
+	}
+	changes <- svc.Status{State: svc.StopPending}
+	return
+}
+
+func runAgentLogic() {
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("[!] Failed to get executable path: %v\n", err)
+	}
+	baseDir := filepath.Dir(exePath)
+	err = os.Chdir(baseDir)
+	if err != nil {
+		log.Fatalf("[!] Failed to change working directory: %v\n", err)
+	}
+	
+	dllPath := filepath.Join(baseDir, "core", "aegis_core.dll")
+	caCertPath := filepath.Join(baseDir, "cert", "ca.crt")
+	clientCertPath := filepath.Join(baseDir, "cert", "client.crt")
+	clientKeyPath := filepath.Join(baseDir, "cert", "client.key")
+
+	log.Println("[*] Loading sensor module from: ", baseDir)
+	caCert, err := os.ReadFile(caCertPath)
 	if err != nil {
 		log.Fatalf("[!] Failed to read CA certificate: %v", err)
 	}
@@ -166,7 +208,7 @@ func main() {
 		log.Fatalf("[!] Failed to append CA certificate to pool")
 	}
 
-	clientCert, err := tls.LoadX509KeyPair("cert/client.crt", "cert/client.key")
+	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
 
 	if err != nil {
 		log.Fatalf("[!] Failed to load client certificate and key: %v", err)
@@ -258,4 +300,22 @@ func main() {
 		testAntiTamperProc.Call()
 	}()
 	select {}
+}
+
+func main() {
+	isInteractive, err := svc.IsAnInteractiveSession()
+	if err != nil {
+		log.Fatalf("[!] Failed to determine if running in interactive session: %v\n", err)
+	}
+
+	if !isInteractive {
+		err = svc.Run(scvName, &aegisService{})
+		if err != nil {
+			log.Fatalf("[!] Service failed: %v\n", err)
+		}
+		return
+	}
+
+	fmt.Println("[*] Running in interactive mode, starting agent logic directly...")
+	runAgentLogic()
 }

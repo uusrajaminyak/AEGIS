@@ -9,7 +9,6 @@ import (
 	"os"
 	"sync"
 	"context"
-
 	"github.com/gin-gonic/gin"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"github.com/uusrajaminyak/aegis-backend/config"
