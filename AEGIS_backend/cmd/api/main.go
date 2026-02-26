@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 	"context"
+	"encoding/json"
 	"github.com/gin-gonic/gin"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"github.com/uusrajaminyak/aegis-backend/config"
@@ -98,6 +99,36 @@ func main() {
 	} else {
 		log.Printf("[*] Stream 'Alerts_Stream' created successfully")
 	}
+
+	go func() {
+		log.Println("[*] Starting NATS worker to process alerts...")
+		_, err := js.Subscribe("Alerts.new", func(msg *nats.Msg) {
+			var payload map[string]interface{}
+			if err := json.Unmarshal(msg.Data, &payload); err != nil {
+				log.Printf("[!] Failed to unmarshal alert message: %v", err)
+				return
+			}
+
+			agentID := payload["agent_id"].(string)
+			eventType := payload["event_type"].(string)
+			severity := payload["severity"].(string)
+			description := payload["description"].(string)
+			action := payload["action"].(string)
+			targetProcess := payload["target_process"].(string)
+
+			query := `INSERT INTO alerts (agent_id, event_type, severity, description, action, target_process) VALUES ($1, $2, $3, $4, $5, $6)`
+			result := adapter.DB.Exec(query, agentID, eventType, severity, description, action, targetProcess)
+			if result.Error != nil {
+				log.Printf("[!] Failed to insert alert into database: %v", result.Error)
+			} else {
+				log.Printf("[+] Alert from agent %s stored in database successfully", agentID)
+			}
+		})
+		if err != nil {
+			log.Printf("[!] Failed to subscribe to NATS subject: %v", err)
+		}
+	}()
+
 
 	go func() {
 		grpcPort := ":9090"
