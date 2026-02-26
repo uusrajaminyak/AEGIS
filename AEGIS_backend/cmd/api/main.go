@@ -1,16 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
-	"log"
-	"net"
-	"os"
-	"sync"
-	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/nats-io/nats.go"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"github.com/uusrajaminyak/aegis-backend/config"
 	"github.com/uusrajaminyak/aegis-backend/internal/adapter"
@@ -20,7 +17,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
-	"github.com/nats-io/nats.go"
+	"log"
+	"net"
+	"os"
+	"sync"
 )
 
 type RateLimiterManager struct {
@@ -91,7 +91,7 @@ func main() {
 	}
 
 	_, err = js.AddStream(&nats.StreamConfig{
-		Name: "Alerts_Stream",
+		Name:     "Alerts_Stream",
 		Subjects: []string{"Alerts.*"},
 	})
 	if err != nil {
@@ -128,7 +128,6 @@ func main() {
 			log.Printf("[!] Failed to subscribe to NATS subject: %v", err)
 		}
 	}()
-
 
 	go func() {
 		grpcPort := ":9090"
@@ -170,11 +169,38 @@ func main() {
 		}
 	}()
 	r := gin.Default()
+
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "pong",
 		})
 	})
+
+	r.GET("/api/alerts", func(c *gin.Context) {
+		var alerts []map[string]interface{}
+		result := adapter.DB.Table("alerts").Order("id Desc").Find(&alerts)
+		if result.Error != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch alerts"})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"status": "success",
+			"data":   alerts,
+		})
+	})
+
 	httpPort := cfg.ServerPort
 	if httpPort == "" {
 		httpPort = ":8080"
