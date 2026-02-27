@@ -20,11 +20,59 @@ import {
   LabelList,
 } from "recharts";
 import axios from "axios";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function Home() {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [commandInput, setCommandInput] = useState("");
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([
+    "AEGIS Tactical Terminal [Version 1.0.0]",
+  ]);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isTerminalOpen && terminalContainerRef.current) {
+      setTimeout(() => {
+        terminalContainerRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "end",
+        });
+      }, 150);
+    }
+  }, [isTerminalOpen]);
+
+  useEffect(() => {
+    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [terminalLogs]);
+
+  const handleCommandSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commandInput.trim()) return;
+
+    const currentCmd = commandInput;
+    setTerminalLogs((prev) => [...prev, `> root@aegis:~# ${currentCmd}`]);
+    setCommandInput("");
+
+    try {
+      const response = await axios.post("http://localhost:8888/api/command", {
+        agent_id: "agent-123",
+        command: currentCmd,
+        target_process: "cmd.exe",
+      });
+      setTerminalLogs((prev) => [
+        ...prev,
+        `[Success] ${response.data.message}`,
+      ]);
+    } catch (error: any) {
+      setTerminalLogs((prev) => [
+        ...prev,
+        `[Error] Failed to execute command: ${error.message}`,
+      ]);
+    }
+  };
 
   useEffect(() => {
     const fetchAlerts = async () => {
@@ -116,13 +164,24 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-4 cursor-pointer hover:bg-slate-800 transition-colors">
-          <div className="p-3 bg-green-500/10 rounded-lg">
-            <Terminal className="w-6 h-6 text-green-500" />
+        <div
+          onClick={() => setIsTerminalOpen(!isTerminalOpen)}
+          className={`p-6 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300 ${
+            isTerminalOpen
+              ? "bg-slate-800 border border-green-500/50 shadow-[0_0_20px_rgba(34,197,94,0.2)]"
+              : "bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-green-500/30"
+          }`}
+        >
+          <div className="p-3 bg-green-500/20 rounded-lg">
+            <Terminal
+              className={`w-6 h-6 text-green-400 ${isTerminalOpen ? "animate-pulse" : ""}`}
+            />
           </div>
           <div>
             <p className="text-slate-400 text-sm">Web Terminal</p>
-            <p className="text-lg font-bold text-green-400">Offline</p>
+            <p className="text-lg font-bold text-green-400">
+              {isTerminalOpen ? "Active" : "Standby"}
+            </p>
           </div>
         </div>
       </div>
@@ -199,7 +258,7 @@ export default function Home() {
           <h2 className="text-xl font-semibold mb-4 text-slate-200 border-b border-slate-800 pb-2">
             Recent Alerts
           </h2>
-          <div className="flex-1 overflow-y-auto pr-2 space-y-3">
+          <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
             {loading ? (
               <p className="text-center text-slate-500 mt-10 animate-pulse">
                 Scanning frequencies...
@@ -212,7 +271,7 @@ export default function Home() {
               alerts.map((alert, index) => (
                 <div
                   key={index}
-                  className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-start gap-3"
+                  className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-start gap-3 shrink-0"
                 >
                   <AlertTriangle
                     className={`w-5 h-5 shrink-0 mt-0.5 ${
@@ -243,6 +302,57 @@ export default function Home() {
               ))
             )}
           </div>
+        </div>
+      </div>
+
+      <div
+        ref={terminalContainerRef}
+        className={`transition-all duration-500 ease-in-out overflow-hidden ${
+          isTerminalOpen
+            ? "max-h-[400px] opacity-100 mt-6"
+            : "max-h-0 opacity-0 mt-0"
+        }`}
+      >
+        <div className="p-6 bg-[#0a0a0a] border border-slate-800 rounded-xl h-[250px] flex flex-col font-mono shadow-inner relative">
+          <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px] z-10 opacity-20"></div>
+
+          <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2 shrink-0 z-20">
+            <Terminal className="w-4 h-4 text-green-500" />
+            <h2 className="text-sm font-semibold text-slate-400">
+              root@aegis:~#
+            </h2>
+          </div>
+
+          <div className="flex-1 overflow-y-auto text-sm text-green-400 space-y-1 mb-2 custom-scrollbar z-20">
+            {terminalLogs.map((log, index) => (
+              <div
+                key={index}
+                className={`
+                ${log.includes("[Error]") ? "text-red-400" : ""} 
+                ${log.includes("[Success]") ? "text-blue-400" : ""}
+              `}
+              >
+                {log}
+              </div>
+            ))}
+            <div ref={terminalEndRef} />
+          </div>
+
+          <form
+            onSubmit={handleCommandSubmit}
+            className="flex gap-2 z-20 shrink-0 mt-2"
+          >
+            <span className="text-green-500 font-bold">{">"}</span>
+            <input
+              type="text"
+              value={commandInput}
+              onChange={(e) => setCommandInput(e.target.value)}
+              className="flex-1 bg-transparent outline-none text-green-400 placeholder-green-800 font-mono"
+              placeholder="Type Command (e.g: kill 4042)"
+              autoComplete="off"
+              spellCheck="false"
+            />
+          </form>
         </div>
       </div>
     </div>

@@ -30,6 +30,12 @@ type RateLimiterManager struct {
 	burst    int
 }
 
+type CommandPayload struct {
+	AgentID       string `json:"agent_id"`
+	Command       string `json:"command"`
+	TargetProcess string `json:"target_process"`
+}
+
 func NewRateLimiterManager(r rate.Limit, b int) *RateLimiterManager {
 	return &RateLimiterManager{
 		limiters: make(map[string]*rate.Limiter),
@@ -198,6 +204,21 @@ func main() {
 		c.JSON(200, gin.H{
 			"status": "success",
 			"data":   alerts,
+		})
+	})
+
+	r.POST("/api/commands", func(c *gin.Context) {
+		var payload CommandPayload
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request payload"})
+			return
+		}
+
+		fmt.Printf("[*] Received command request: AgentID=%s, Command=%s, TargetProcess=%s\n", payload.AgentID, payload.Command, payload.TargetProcess)
+
+		c.JSON(200, gin.H{
+			"status": "success",
+			"message":   "Command: " + payload.Command + " sent to agent " + payload.AgentID,
 		})
 	})
 
