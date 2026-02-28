@@ -207,14 +207,30 @@ func main() {
 		})
 	})
 
-	r.POST("/api/commands", func(c *gin.Context) {
+	r.POST("/api/command", func(c *gin.Context) {
 		var payload CommandPayload
+
 		if err := c.ShouldBindJSON(&payload); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request payload"})
 			return
 		}
 
 		fmt.Printf("[*] Received command request: AgentID=%s, Command=%s, TargetProcess=%s\n", payload.AgentID, payload.Command, payload.TargetProcess)
+
+		commandBytes, err := json.Marshal(payload)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to marshal command payload"})
+			return
+		}
+
+		natsTopic := "agent." + payload.AgentID + ".command"
+		err = nc.Publish(natsTopic, commandBytes)
+
+		if err != nil {
+			log.Printf("[!] Failed to publish command to NATS: %v", err)
+			c.JSON(500, gin.H{"error": "Failed to send command to agent"})
+			return
+		}
 
 		c.JSON(200, gin.H{
 			"status": "success",

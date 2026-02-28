@@ -64,12 +64,12 @@ export default function Home() {
       });
       setTerminalLogs((prev) => [
         ...prev,
-        `[Success] ${response.data.message}`,
+        `[+] ${response.data.message}`,
       ]);
     } catch (error: any) {
       setTerminalLogs((prev) => [
         ...prev,
-        `[Error] Failed to execute command: ${error.message}`,
+        `[-] Failed to execute command: ${error.message}`,
       ]);
     }
   };
@@ -318,9 +318,6 @@ export default function Home() {
 
           <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2 shrink-0 z-20">
             <Terminal className="w-4 h-4 text-green-500" />
-            <h2 className="text-sm font-semibold text-slate-400">
-              root@aegis:~#
-            </h2>
           </div>
 
           <div className="flex-1 overflow-y-auto text-sm text-green-400 space-y-1 mb-2 custom-scrollbar z-20">
