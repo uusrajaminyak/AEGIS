@@ -13,13 +13,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	"log"
 	"os"
-	"os/exec"
+	// "os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
-	"path/filepath"
 )
 
 var hqClient pb.AegisSentinelClient
@@ -48,6 +48,23 @@ func listenToHQ() {
 			localRuleCache = strings.Split(res.Payload, ",")
 			cacheMutex.Unlock()
 			log.Printf("[*] Local rule cache updated, total threat remembered: %v\n", len(localRuleCache))
+		} else {
+			log.Printf("[*] Received command from HQ:\n")
+			log.Printf("[*] Command: %s\n", res.Payload)
+			parts := strings.Fields(res.Payload)
+
+			if len(parts) >= 2 {
+				action := strings.ToUpper(parts[0])
+				target := parts[1]
+				if action == "KILL" {
+					log.Printf("[*] Attempting to kill process matching: %s\n", target)
+					go killProcessNative(target)
+				} else {
+					log.Printf("[-] Unknown command action: %s\n", action)
+				}
+			} else {
+				log.Printf("[-] Invalid command format received: %s\n", res.Payload)
+			}
 		}
 	}
 }
@@ -190,7 +207,7 @@ func runAgentLogic() {
 	if err != nil {
 		log.Fatalf("[!] Failed to change working directory: %v\n", err)
 	}
-	
+
 	dllPath := filepath.Join(baseDir, "core", "aegis_core.dll")
 	caCertPath := filepath.Join(baseDir, "cert", "ca.crt")
 	clientCertPath := filepath.Join(baseDir, "cert", "client.crt")
@@ -258,47 +275,48 @@ func runAgentLogic() {
 	hqClient = pb.NewAegisSentinelClient(conn)
 	fmt.Println("[+] Connected to HQ")
 	go listenToHQ()
-	testNetProc, err := aegisCore.FindProc("TestNetworkHook")
 
-	if err != nil {
-		log.Fatalf("[-] Failed to find TestNetworkHook procedure: %v\n", err)
-	}
+	// testNetProc, err := aegisCore.FindProc("TestNetworkHook")
 
-	testFileProc, err := aegisCore.FindProc("TestFileHook")
-	if err != nil {
-		log.Fatalf("[-] Failed to find TestFileHook procedure: %v\n", err)
-	}
+	// if err != nil {
+	// 	log.Fatalf("[-] Failed to find TestNetworkHook procedure: %v\n", err)
+	// }
 
-	testAntiTamperProc, err := aegisCore.FindProc("TestAntiTamperHook")
-	if err != nil {
-		log.Fatalf("[-] Failed to find TestAntiTamperHook procedure: %v\n", err)
-	}
+	// testFileProc, err := aegisCore.FindProc("TestFileHook")
+	// if err != nil {
+	// 	log.Fatalf("[-] Failed to find TestFileHook procedure: %v\n", err)
+	// }
 
-	fmt.Println("[*] Testing network hook...")
-	fmt.Println("[*] Simulating fileless process creation...")
+	// testAntiTamperProc, err := aegisCore.FindProc("TestAntiTamperHook")
+	// if err != nil {
+	// 	log.Fatalf("[-] Failed to find TestAntiTamperHook procedure: %v\n", err)
+	// }
 
-	go func() {
-		time.Sleep(2 * time.Second)
-		cmd := exec.Command("powershell.exe", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", "Start-Sleep -Seconds 15")
-		err := cmd.Start()
+	// fmt.Println("[*] Testing network hook...")
+	// fmt.Println("[*] Simulating fileless process creation...")
 
-		if err != nil {
-			log.Printf("[-] Failed to simulate fileless malware: %v\n", err)
-		} else {
-			log.Printf("[+] Fileless malware simulation started with PID: %d\n", cmd.Process.Pid)
-		}
+	// go func() {
+	// 	time.Sleep(2 * time.Second)
+	// 	cmd := exec.Command("powershell.exe", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", "Start-Sleep -Seconds 15")
+	// 	err := cmd.Start()
 
-		time.Sleep(2 * time.Second)
-		testNetProc.Call()
+	// 	if err != nil {
+	// 		log.Printf("[-] Failed to simulate fileless malware: %v\n", err)
+	// 	} else {
+	// 		log.Printf("[+] Fileless malware simulation started with PID: %d\n", cmd.Process.Pid)
+	// 	}
 
-		time.Sleep(2 * time.Second)
-		fmt.Println("[*] Testing file hook...")
-		testFileProc.Call()
+	// 	time.Sleep(2 * time.Second)
+	// 	testNetProc.Call()
 
-		time.Sleep(2 * time.Second)
-		fmt.Println("[*] Testing anti-tamper hook...")
-		testAntiTamperProc.Call()
-	}()
+	// 	time.Sleep(2 * time.Second)
+	// 	fmt.Println("[*] Testing file hook...")
+	// 	testFileProc.Call()
+
+	// 	time.Sleep(2 * time.Second)
+	// 	fmt.Println("[*] Testing anti-tamper hook...")
+	// 	testAntiTamperProc.Call()
+	// }()
 	select {}
 }
 

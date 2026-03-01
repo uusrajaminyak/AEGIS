@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <windows.h>
+#include <tlhelp32.h>
 #include "MinHook.h"
 
 std::string WideToUTF8(const std::wstring &wstr)
@@ -13,6 +14,16 @@ std::string WideToUTF8(const std::wstring &wstr)
     std::string strTo(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
     return strTo;
+}
+
+std::wstring UTF8ToWide(const std::string &str)
+{
+    if (str.empty())
+        return std::wstring();
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+    std::wstring wstrTo(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+    return wstrTo;
 }
 
 typedef uintptr_t (*AlertCallback)(uintptr_t severity, uintptr_t messagePtr);
@@ -193,5 +204,37 @@ extern "C"
         {
             std::cout << "[+] Anti-Tamper succeeded: Access denied as expected." << std::endl;
         }
+    }
+
+    __declspec(dllexport) BOOL ExecuteKillCommand(const char* targetProcessName)
+    {
+        std::wstring wTarget = UTF8ToWide(targetProcessName);
+        HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnapshot == INVALID_HANDLE_VALUE) return FALSE;
+
+        PROCESSENTRY32W pe;
+        pe.dwSize = sizeof(PROCESSENTRY32W);
+        BOOL isKilled = FALSE;
+
+        if (Process32FirstW(hSnapshot, &pe))
+        {
+            do
+            {
+                if (_wcsicmp(pe.szExeFile, wTarget.c_str()) == 0)
+                {
+                    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                    if (hProcess)
+                    {
+                        TerminateProcess(hProcess, 1);
+                        CloseHandle(hProcess);
+                        isKilled = TRUE;
+                        std::cout << "[+] Process " << targetProcessName << " terminated successfully." << std::endl;
+                        break;
+                    }
+                }
+            } while (Process32NextW(hSnapshot, &pe));
+        }
+        CloseHandle(hSnapshot);
+        return isKilled;
     }
 }

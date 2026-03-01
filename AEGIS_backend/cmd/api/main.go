@@ -129,7 +129,7 @@ func main() {
 			} else {
 				log.Printf("[+] Alert from agent %s stored in database successfully", agentID)
 			}
-		})
+		}, nats.DeliverNew())
 		if err != nil {
 			log.Printf("[!] Failed to subscribe to NATS subject: %v", err)
 		}
