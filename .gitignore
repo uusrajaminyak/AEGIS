@@ -33,3 +33,5 @@ data/
 .vscode/
 .idea/
 Thumbs.db
+
+.gitignore
