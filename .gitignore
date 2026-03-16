@@ -1,10 +1,35 @@
+# Folder raksasa & Dependencies
+node_modules/
+vendor/
+.next/
+out/
+dist/
+bin/
+
+# File Sensitif & Rahasia
 .env
-aegis-backend.exe
-docker-compose.yml
+.env.*
+*.pem
+*.key
+*cert
+.ssh/
+
+# File Binari & Hasil Build
 *.exe
 *.dll
 *.so
 *.o
-*cert
+aegis-backend.exe
+docker-compose.yml
 
-vendor/
+# Database & Logs
+*.log
+*.db
+*.sqlite
+data/
+
+# OS & Editor
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db

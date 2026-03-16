@@ -1,6 +1,48 @@
 @import "tailwindcss";
 
+/* 1. TEMA DEFAULT (BIRU TUA / SLATE) */
+:root {
+  --bg-main: #020617;
+  --bg-card: #0f172a;
+  --border-main: #1e293b;
+  --border-grid: #334155;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+/* 2. TEMA HITAM ELEGAN (OFF-BLACK) */
+[data-theme="dark"] {
+  --bg-main: #121212; /* Hitam pudar, nggak bikin sakit mata */
+  --bg-card: #1e1e1e; /* Abu-abu super gelap buat kotaknya */
+  --border-main: #333333;
+  --border-grid: #444444;
+  --text-main: #f5f5f5;
+  --text-muted: #a0a0a0;
+}
+
+/* 3. TEMA PUTIH TULANG (CREAM/BONE WHITE) */
+[data-theme="light"] {
+  --bg-main: #f9f9f6; /* Putih tulang / Cream */
+  --bg-card: #ffffff; /* Putih bersih buat kotaknya biar nonjol */
+  --border-main: #e2e8f0;
+  --border-grid: #cbd5e1;
+  --text-main: #0f172a; /* Teksnya jadi gelap biar kebaca */
+  --text-muted: #64748b;
+}
+
+/* Daftarin warna bunglonnya ke mesin Tailwind v4 */
+@theme {
+  --color-main: var(--bg-main);
+  --color-card: var(--bg-card);
+  --color-line: var(--border-main);
+  --color-gridline: var(--border-grid);
+  --color-text-p: var(--text-main);
+  --color-text-s: var(--text-muted);
+}
+
+/* Terapin ke background utama */
 body {
-  background-color: #020617;
-  color: #f8fafc;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
