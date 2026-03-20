@@ -100,6 +100,12 @@ func main() {
 		Name:     "Alerts_Stream",
 		Subjects: []string{"Alerts.*"},
 	})
+
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:     "COMMANDS",
+		Subjects: []string{"agent.*.command"},
+	})
+
 	if err != nil {
 		log.Printf("[!] Failed to add stream (might already exist): %v", err)
 	} else {
@@ -224,7 +230,8 @@ func main() {
 		}
 
 		natsTopic := "agent." + payload.AgentID + ".command"
-		err = nc.Publish(natsTopic, commandBytes)
+
+		_, err = js.Publish(natsTopic, commandBytes)
 
 		if err != nil {
 			log.Printf("[!] Failed to publish command to NATS: %v", err)
@@ -232,9 +239,11 @@ func main() {
 			return
 		}
 
+		log.Printf("[+] Command published to NATS topic %s: %s", natsTopic, string(commandBytes))
+
 		c.JSON(200, gin.H{
-			"status": "success",
-			"message":   "Command: " + payload.Command + " sent to agent " + payload.AgentID,
+			"status":  "success",
+			"message": "Command: " + payload.Command + " sent to agent " + payload.AgentID,
 		})
 	})
 

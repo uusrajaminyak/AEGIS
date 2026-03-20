@@ -15,6 +15,7 @@ import (
 	"os"
 	// "os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -124,27 +125,32 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 
 func killProcessNative(pattern string) {
 	fmt.Printf("[*] Scanning for processes matching pattern: %s\n", pattern)
-	processes, err := process.Processes()
-
-	if err != nil {
-		log.Printf("[-] Failed to list processes: %v\n", err)
-		return
-	}
-
+	
 	targetPID := int32(0)
-	safePattern := strings.ToLower(pattern)
 
-	for _, p := range processes {
-		if int32(os.Getpid()) == p.Pid {
-			continue
+	if pid, err := strconv.Atoi(pattern); err == nil {
+		targetPID = int32(pid)
+		log.Printf("[*] Pattern is numeric, treating as PID: %d\n", targetPID)
+	} else {
+		processes, err := process.Processes()
+		if err != nil {
+			log.Printf("[-] Failed to list processes: %v\n", err)
+			return
 		}
-		cmdline, err := p.Cmdline()
-		if err == nil && strings.Contains(strings.ToLower(cmdline), safePattern) {
-			targetPID = p.Pid
-			log.Printf("[+] Found matching process\n")
-			log.Printf("[*] PID: %d\n", p.Pid)
-			log.Printf("[*] Command Line: %s\n", cmdline)
-			break
+
+		safePattern := strings.ToLower(pattern)
+
+		for _, p := range processes {
+			if int32(os.Getpid()) == p.Pid {
+				continue
+			}
+			cmdline, err := p.Cmdline()
+
+			if err == nil && strings.Contains(strings.ToLower(cmdline), safePattern) {
+				targetPID = p.Pid
+				log.Printf("[+] Found process matching pattern: PID %d, Cmdline: %s\n", p.Pid, cmdline)
+				break
+			} 
 		}
 	}
 
@@ -162,7 +168,9 @@ func killProcessNative(pattern string) {
 	}
 
 	defer windows.CloseHandle(handle)
+
 	err = windows.TerminateProcess(handle, 1)
+	
 	if err != nil {
 		log.Printf("[-] Failed to terminate process with PID %d: %v\n", targetPID, err)
 	} else {

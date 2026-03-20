@@ -2,14 +2,14 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"gorm.io/gorm"
 	"log"
 	"strings"
 	"time"
-	"encoding/json"
-	"github.com/nats-io/nats.go"
 )
 
 type SentinelServer struct {
@@ -72,12 +72,12 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 
 	if s.JS != nil {
 		payload := map[string]interface{}{
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-			"agent_id": req.AgentId,
-			"event_type": req.EventType,
-			"severity": req.Severity,
-			"description": req.Description,
-			"action": action,
+			"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			"agent_id":       req.AgentId,
+			"event_type":     req.EventType,
+			"severity":       req.Severity,
+			"description":    req.Description,
+			"action":         action,
 			"target_process": targetProcess,
 		}
 		jsonData, err := json.Marshal(payload)
@@ -104,26 +104,84 @@ func (s *SentinelServer) SendAlert(ctx context.Context, req *pb.AlertRequest) (*
 
 func (s *SentinelServer) CommandStream(req *pb.CommandRequest, stream pb.AegisSentinel_CommandStreamServer) error {
 	log.Printf("[+] Agent %s connected for command stream", req.AgentId)
+	sendChan := make(chan *pb.CommandMessage, 100)
+	ctx := stream.Context()
+
+	if s.JS != nil {
+		subject := "agent." + req.AgentId + ".command"
+		sub, err := s.JS.Subscribe(subject, func(msg *nats.Msg) {
+			var payload map[string]interface{}
+			commandStr := ""
+
+			if err := json.Unmarshal(msg.Data, &payload); err == nil {
+				if cmd, ok := payload["command"].(string); ok {
+					commandStr = cmd
+				} else {
+					commandStr = string(msg.Data)
+				}
+				if commandStr != "" {
+					log.Printf("[+] Received command for Agent %s: %s", req.AgentId, commandStr)
+					sendChan <- &pb.CommandMessage{
+						Type:    "EXECUTE",
+						Payload: commandStr,
+					}
+				}
+			}
+		}, nats.DeliverNew())
+
+		if err != nil {
+			log.Printf("[!] Failed to subscribe to NATS subject %s: %v", subject, err)
+		} else {
+			log.Printf("[+] Subscribed to NATS subject: %s", subject)
+			defer sub.Unsubscribe()
+		}
+	}
+
+	go func() {
+		s.syncRulesToChannel(sendChan)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.syncRulesToChannel(sendChan)
+			}
+		}
+	}()
+
 	for {
-		var activeRules []DetectionRule
-		if s.DB != nil {
-			s.DB.Where("is_active = ?", true).Find(&activeRules)
+		select {
+		case <-ctx.Done():
+			log.Printf("[+] Agent %s disconnected from command stream", req.AgentId)
+			return nil
+		case res := <-sendChan:
+			if err := stream.Send(res); err != nil {
+				log.Printf("[!] Failed to send command to Agent %s: %v", req.AgentId, err)
+				return err
+			}
 		}
+	}
+}
 
-		var ruleNames []string
-		for _, rule := range activeRules {
-			ruleNames = append(ruleNames, strings.ToLower(rule.ProcessName))
-		}
-		combinedRules := strings.Join(ruleNames, ",")
-		res := &pb.CommandMessage{
-			Type:    "SYNC_RULES",
-			Payload: combinedRules,
-		}
+func (s *SentinelServer) syncRulesToChannel(sendChan chan<- *pb.CommandMessage) {
+	var activeRules []DetectionRule
 
-		if err := stream.Send(res); err != nil {
-			log.Printf("[!] Error sending command to agent %s: %v", req.AgentId, err)
-			return err
-		}
-		time.Sleep(30 * time.Second)
+	if s.DB != nil {
+		s.DB.AutoMigrate(&DetectionRule{})
+		s.DB.Where("is_active = ?", true).Find(&activeRules)
+	}
+
+	var ruleNames []string
+	for _, rule := range activeRules {
+		ruleNames = append(ruleNames, strings.ToLower(rule.ProcessName))
+	}
+
+	combinedRules := strings.Join(ruleNames, ",")
+	sendChan <- &pb.CommandMessage{
+		Type:    "SYNC_RULES",
+		Payload: combinedRules,
 	}
 }
