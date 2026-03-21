@@ -355,6 +355,24 @@ func startETWProcessMonitor() {
 
 	log.Println("[*] ETW process monitor started, listening for events...")
 
+	noisyProcesses := map[string]bool{
+		"svchost.exe":            true,
+		"conhost.exe":            true,
+		"runtimebroker.exe":      true,
+		"taskhostw.exe":          true,
+		"searchhost.exe":         true,
+		"sihost.exe":             true,
+		"backgroundtaskhost.exe": true,
+		"compattelrunner.exe":    true,
+		"windowsterminal.exe":    true,
+		"wmiadap.exe":            true,
+		"dashost.exe":            true,
+		"ctfmon.exe":             true,
+	}
+
+	var recentProcessCache sync.Map
+	const cooldownPeriod = 10 * time.Minute
+
 	for e := range consumer.Events {
 		if e.System.EventID == 1 {
 			imageName := fmt.Sprintf("%v", e.EventData["ImageName"])
@@ -365,6 +383,23 @@ func startETWProcessMonitor() {
 			if imageName == "<nil>" || imageName == "" || processIDStr == myPid {
 				continue
 			}
+
+			baseName := strings.ToLower(filepath.Base(imageName))
+
+			if noisyProcesses[baseName] {
+				continue
+			}
+
+			cacheKey := baseName + "|" + commandLine
+
+			lastSeen, exists := recentProcessCache.Load(cacheKey)
+			if exists {
+				if time.Since(lastSeen.(time.Time)) < cooldownPeriod {
+					continue
+				}
+			}
+
+			recentProcessCache.Store(cacheKey, time.Now())
 
 			log.Printf("[+] ETW Event - New Process Created: Image=%s, PID=%s, CommandLine=%s\n", imageName, processIDStr, commandLine)
 
