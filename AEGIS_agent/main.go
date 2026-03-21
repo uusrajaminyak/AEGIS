@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/0xrawsec/golang-etw/etw"
 	"github.com/shirou/gopsutil/v3/process"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
 	"golang.org/x/sys/windows"
@@ -125,7 +126,7 @@ func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
 
 func killProcessNative(pattern string) {
 	fmt.Printf("[*] Scanning for processes matching pattern: %s\n", pattern)
-	
+
 	targetPID := int32(0)
 
 	if pid, err := strconv.Atoi(pattern); err == nil {
@@ -150,7 +151,7 @@ func killProcessNative(pattern string) {
 				targetPID = p.Pid
 				log.Printf("[+] Found process matching pattern: PID %d, Cmdline: %s\n", p.Pid, cmdline)
 				break
-			} 
+			}
 		}
 	}
 
@@ -170,7 +171,7 @@ func killProcessNative(pattern string) {
 	defer windows.CloseHandle(handle)
 
 	err = windows.TerminateProcess(handle, 1)
-	
+
 	if err != nil {
 		log.Printf("[-] Failed to terminate process with PID %d: %v\n", targetPID, err)
 	} else {
@@ -325,7 +326,63 @@ func runAgentLogic() {
 	// 	fmt.Println("[*] Testing anti-tamper hook...")
 	// 	testAntiTamperProc.Call()
 	// }()
+
+	go startETWProcessMonitor()
+
 	select {}
+}
+
+func startETWProcessMonitor() {
+	log.Println("[*] Starting ETW process monitor...")
+	session := etw.NewRealTimeSession("AEGISETWSession")
+	defer session.Stop()
+
+	provider := etw.MustParseProvider("22fb2cd6-0e7b-422b-a0c7-2fad1fd0e716")
+
+	if err := session.EnableProvider(provider); err != nil {
+		log.Printf("[-] Failed to enable ETW provider: %v\n", err)
+	}
+
+	consumer := etw.NewRealTimeConsumer(context.Background())
+	defer consumer.Stop()
+	consumer.FromSessions(session)
+
+	go func() {
+		if err := consumer.Start(); err != nil {
+			log.Printf("[-] Failed to start ETW consumer: %v\n", err)
+		}
+	}()
+
+	log.Println("[*] ETW process monitor started, listening for events...")
+
+	for e := range consumer.Events {
+		if e.System.EventID == 1 {
+			imageName := fmt.Sprintf("%v", e.EventData["ImageName"])
+			processIDStr := fmt.Sprintf("%v", e.EventData["ProcessID"])
+			commandLine := fmt.Sprintf("%v", e.EventData["CommandLine"])
+			myPid := fmt.Sprintf("%d", os.Getpid())
+
+			if imageName == "<nil>" || imageName == "" || processIDStr == myPid {
+				continue
+			}
+
+			log.Printf("[+] ETW Event - New Process Created: Image=%s, PID=%s, CommandLine=%s\n", imageName, processIDStr, commandLine)
+
+			if hqClient != nil {
+				go func(img, pid string) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					req := &pb.AlertRequest{
+						AgentId:     "agent-123",
+						Description: fmt.Sprintf("New process created: Image=%s, PID=%s, CommandLine=%s", img, pid, commandLine),
+						EventType:   "ETW_ProcessCreation",
+						Severity:    "Medium",
+					}
+					hqClient.SendAlert(ctx, req)
+				}(imageName, processIDStr)
+			}
+		}
+	}
 }
 
 func main() {
