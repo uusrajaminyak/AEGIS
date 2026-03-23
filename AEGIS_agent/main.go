@@ -5,6 +5,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
+	"os"
+
 	"github.com/0xrawsec/golang-etw/etw"
 	"github.com/shirou/gopsutil/v3/process"
 	pb "github.com/uusrajaminyak/aegis-backend/api/proto"
@@ -12,8 +15,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"log"
-	"os"
+
 	// "os/exec"
 	"path/filepath"
 	"strconv"
@@ -86,6 +88,29 @@ func cStringToGo(ptr uintptr) string {
 		bytes = append(bytes, b)
 	}
 	return string(bytes)
+}
+
+func loadNoisyProcesses() map[string]bool {
+	noisyMap := make(map[string]bool)
+	exePath, _ := os.Executable()
+	baseDir := filepath.Dir(exePath)
+	whitelistPath := filepath.Join(baseDir, "whitelist.txt")
+
+	data, err := os.ReadFile(whitelistPath)
+	if err != nil {
+		log.Printf("[-] Failed to read whitelist file: %v\n", err)
+		return noisyMap
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		cleanLine := strings.TrimSpace(strings.ToLower(line))
+		if cleanLine != "" && !strings.HasPrefix(cleanLine, "#") {
+			noisyMap[cleanLine] = true
+		}
+	}
+	log.Printf("[*] Loaded %d entries from whitelist\n", len(noisyMap))
+	return noisyMap
 }
 
 func onAlertReceived(severity uintptr, messagePtr uintptr) uintptr {
@@ -355,23 +380,30 @@ func startETWProcessMonitor() {
 
 	log.Println("[*] ETW process monitor started, listening for events...")
 
-	noisyProcesses := map[string]bool{
-		"svchost.exe":            true,
-		"conhost.exe":            true,
-		"runtimebroker.exe":      true,
-		"taskhostw.exe":          true,
-		"searchhost.exe":         true,
-		"sihost.exe":             true,
-		"backgroundtaskhost.exe": true,
-		"compattelrunner.exe":    true,
-		"windowsterminal.exe":    true,
-		"wmiadap.exe":            true,
-		"dashost.exe":            true,
-		"ctfmon.exe":             true,
-	}
+	noisyProcesses := loadNoisyProcesses()
 
 	var recentProcessCache sync.Map
 	const cooldownPeriod = 10 * time.Minute
+
+	go func() {
+		for {
+			time.Sleep(15 * time.Minute)
+			now := time.Now()
+			clearedCount := 0
+
+			recentProcessCache.Range(func(key, value interface{}) bool {
+				lastSeen := value.(time.Time)
+				if now.Sub(lastSeen) > cooldownPeriod {
+					recentProcessCache.Delete(key)
+					clearedCount++
+				}
+				return true
+			})
+			if clearedCount > 0 {
+				log.Printf("[*] Cleared %d old entries from recent process cache\n", clearedCount)
+			}
+		}
+	}()
 
 	for e := range consumer.Events {
 		if e.System.EventID == 1 {
@@ -384,7 +416,14 @@ func startETWProcessMonitor() {
 				continue
 			}
 
+			lowerImage := strings.ToLower(imageName)
 			baseName := strings.ToLower(filepath.Base(imageName))
+
+			isSystemDir := strings.HasPrefix(lowerImage, "c:\\windows\\system32") || strings.HasPrefix(lowerImage, "c:\\windows\\syswow64")
+
+			if isSystemDir && noisyProcesses[baseName] {
+				continue
+			}
 
 			if noisyProcesses[baseName] {
 				continue

@@ -1,0 +1,12 @@
+svchost.exe
+conhost.exe
+runtimebroker.exe
+taskhostw.exe
+searchhost.exe
+sihost.exe
+backgroundtaskhost.exe
+compattelrunner.exe
+windowsterminal.exe
+wmiadap.exe
+dashost.exe
+ctfmon.exe
